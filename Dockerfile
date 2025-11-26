@@ -1,5 +1,7 @@
-# Use official piston engine
 FROM ghcr.io/engineer-man/piston:latest
+
+# Install wget since base image doesn't include it
+RUN apt-get update && apt-get install -y wget && apt-get clean
 
 # Create folder for installed language packages
 RUN mkdir -p /piston/packages
@@ -16,7 +18,7 @@ RUN cd /piston/packages && \
     tar -xf python-3.10.0.tar.gz && \
     rm python-3.10.0.tar.gz
 
-# Install Node.js (JavaScript)
+# Install Node.js
 RUN cd /piston/packages && \
     wget https://github.com/engineer-man/piston/releases/download/pkgs/node-18.15.0.tar.gz && \
     tar -xf node-18.15.0.tar.gz && \
@@ -28,8 +30,7 @@ RUN cd /piston/packages && \
     tar -xf java-15.0.2.tar.gz && \
     rm java-15.0.2.tar.gz
 
-# Expose API port (Piston runs on 2000 by default)
+# Expose API port
 EXPOSE 2000
 
-# Start piston API
-CMD [ "piston-api" ]
+CMD ["piston-api"]
