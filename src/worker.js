@@ -153,7 +153,7 @@ async function processSubmission(submission) {
 
     // Send verdict back to backend
     try {
-        await axios.post(`${BACKEND_URL}/judge/callback`, {
+        await axios.post(`${BACKEND_URL}/api/judge/callback`, {
             submissionId: id,
             status: verdict,
             output: results // Send structured JSON
