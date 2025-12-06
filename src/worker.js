@@ -21,7 +21,7 @@ const LANGUAGE_MAP = {
     'javascript': { language: 'javascript', version: '18.15.0' },
     'python': { language: 'python', version: '3.10.0' },
     'java': { language: 'java', version: '15.0.2' },
-    'cpp': { language: 'c++', version: '10.2.0' }
+    'cpp': { language: 'cpp', version: '10.2.0' }
 };
 
 // Rate Limiter: Ensure max requests per second
@@ -67,19 +67,19 @@ async function runTestCase(testCase, i, total, content, langConfig) {
 
     const payload = {
         language: langConfig.language,
-        version: langConfig.version,
+        // version: langConfig.version,
         files: [{
-            name: langConfig.language === 'c++' ? 'source.cpp' :
+            name: langConfig.language === 'cpp' ? 'source.cpp' :
                 langConfig.language === 'java' ? 'Main.java' :
                     langConfig.language === 'python' ? 'main.py' : 'main.js',
             content
         }],
         stdin: testCase.input,
-        args: [],
+        // args: [],
         compile_timeout: 10000,
         run_timeout: 3000,
-        compile_memory_limit: -1,
-        run_memory_limit: -1
+        // compile_memory_limit: -1,
+        // run_memory_limit: -1
     };
 
     let response;
