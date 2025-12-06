@@ -13,7 +13,8 @@ redis.on('error', (err) => {
 });
 
 const BACKEND_URL = process.env.BACKEND_URL;
-const PISTON_API_URL = 'https://sidcj-production.up.railway.app/api/v2/piston/execute' || 'https://universally-electrodialitic-danette.ngrok-free.dev/api/v2/piston/execute' || process.env.PISTON_API_URL || 'https://emkc.org/api/v2/piston/execute';
+const PISTON_API_URL = 'https://sidcj-production.up.railway.app/api/v2/piston/execute' 
+// || 'https://universally-electrodialitic-danette.ngrok-free.dev/api/v2/piston/execute' || process.env.PISTON_API_URL || 'https://emkc.org/api/v2/piston/execute';
 
 console.log('Judge Worker started (Online Mode - Piston API), listening for submissions...');
 
