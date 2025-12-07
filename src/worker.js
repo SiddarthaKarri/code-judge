@@ -13,7 +13,7 @@ redis.on('error', (err) => {
 });
 
 const BACKEND_URL = process.env.BACKEND_URL;
-const PISTON_API_URL = 'https://boc-coupon-immigration-sophisticated.trycloudflare.com/api/v2/piston/execute'
+const PISTON_API_URL = process.env.PISTON_API_URL || 'https://boc-coupon-immigration-sophisticated.trycloudflare.com/api/v2/piston/execute'
 // 'https://sidcj-production.up.railway.app/api/v2/piston/execute'
 // || 'https://universally-electrodialitic-danette.ngrok-free.dev/api/v2/piston/execute' || process.env.PISTON_API_URL || 'https://emkc.org/api/v2/piston/execute';
 
@@ -79,7 +79,7 @@ async function runTestCase(testCase, i, total, content, langConfig) {
         language: langConfig.language,
         // version: langConfig.version,
         files: [{
-            name: langConfig.language === 'cpp' ? 'source.cpp' :
+            name: langConfig.language === 'cpp' ? 'main.cpp' :
                 langConfig.language === 'java' ? 'Main.java' :
                     langConfig.language === 'python' ? 'main.py' : 'main.js',
             content
@@ -167,31 +167,87 @@ async function processSubmission(submission) {
         if (!targetTestCases || targetTestCases.length === 0) {
             console.log('No test cases found, defaulting to Accepted');
         } else {
-            // Run test cases with RATE LIMIT
-            const promises = targetTestCases.map((tc, i) =>
-                schedule(() => runTestCase(tc, i, targetTestCases.length, code, langConfig))
-            );
+            console.log(`Sending BATCH request for ${targetTestCases.length} test cases...`);
 
-            const rawResults = await Promise.all(promises);
+            // Prepare Batch Payload
+            const payload = {
+                language: langConfig.language,
+                files: [{
+                    name: langConfig.language === 'cpp' ? 'main.cpp' :
+                        langConfig.language === 'java' ? 'Main.java' :
+                            langConfig.language === 'python' ? 'main.py' : 'main.js',
+                    content: code
+                }],
+                inputs: targetTestCases.map(tc => tc.input), // BATCH INPUTS
+                compile_timeout: 10000,
+                run_timeout: 3000
+            };
 
-            // Aggregate results
-            for (const res of rawResults) {
-                // Determine final verdict priority: Compilation Error > Runtime Error > Wrong Answer > Accepted
-                if (res.verdict === 'Compilation Error') {
+            let response;
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    response = await axios.post(PISTON_API_URL, payload);
+                    break;
+                } catch (err) {
+                    if (err.response && (err.response.status === 429 || err.response.status >= 500)) {
+                        console.log(`Judge Error (${err.response.status}). Retrying... (${retries})`);
+                        await new Promise(r => setTimeout(r, 1500));
+                        retries--;
+                    } else {
+                        throw err;
+                    }
+                }
+            }
+            if (!response) throw new Error('Failed to execute code after retries');
+
+            const batchResults = response.data.results || [];
+
+            // Map back to our structure
+            for (let i = 0; i < targetTestCases.length; i++) {
+                const tc = targetTestCases[i];
+                const res = batchResults[i] || { stdout: '', stderr: 'Execution Missing', code: -1 };
+
+                let caseStatus = 'Accepted';
+                let verdict = 'Accepted';
+                let actualOutput = '';
+                let error = null;
+
+                if (response.data.compile && response.data.compile.code !== 0) {
+                    caseStatus = 'Compilation Error';
+                    verdict = 'Compilation Error';
+                    error = response.data.compile.stdout + response.data.compile.stderr;
+                } else if (res.code !== 0) {
+                    caseStatus = 'Runtime Error';
+                    verdict = 'Runtime Error';
+                    error = `Exit Code: ${res.code}\nError: ${res.stderr}`;
+                } else {
+                    actualOutput = (res.stdout || '').trim();
+                    if (!actualOutput) actualOutput = '(No output)';
+                    const expectedOutput = tc.output.trim();
+
+                    if (actualOutput !== expectedOutput) {
+                        caseStatus = 'Wrong Answer';
+                        verdict = 'Wrong Answer';
+                    }
+                }
+
+                // Update final verdict priority
+                if (verdict === 'Compilation Error') {
                     finalVerdict = 'Compilation Error';
-                } else if (res.verdict === 'Runtime Error' && finalVerdict !== 'Compilation Error') {
+                } else if (verdict === 'Runtime Error' && finalVerdict !== 'Compilation Error') {
                     finalVerdict = 'Runtime Error';
-                } else if (res.verdict === 'Wrong Answer' && finalVerdict !== 'Compilation Error' && finalVerdict !== 'Runtime Error') {
+                } else if (verdict === 'Wrong Answer' && finalVerdict !== 'Compilation Error' && finalVerdict !== 'Runtime Error') {
                     finalVerdict = 'Wrong Answer';
                 }
 
                 // Mask details for hidden test cases
-                let displayInput = res.input;
-                let displayExpected = res.output;
-                let displayActual = res.actualOutput;
-                let displayError = res.error;
+                let displayInput = tc.input;
+                let displayExpected = tc.output;
+                let displayActual = actualOutput;
+                let displayError = error;
 
-                if (mode === 'submit' && !res.isSample) {
+                if (mode === 'submit' && !tc.isSample) {
                     displayInput = 'Hidden';
                     displayExpected = 'Hidden';
                     displayActual = 'Hidden';
@@ -199,13 +255,13 @@ async function processSubmission(submission) {
                 }
 
                 results.push({
-                    id: res.id,
-                    status: res.status,
+                    id: i + 1,
+                    status: caseStatus,
                     input: displayInput,
                     expectedOutput: displayExpected,
                     actualOutput: displayActual,
                     error: displayError,
-                    isSample: res.isSample
+                    isSample: tc.isSample
                 });
             }
         }
