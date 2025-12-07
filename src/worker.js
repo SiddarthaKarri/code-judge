@@ -19,12 +19,20 @@ const PISTON_API_URL = 'https://boc-coupon-immigration-sophisticated.trycloudfla
 
 console.log('Judge Worker started (Online Mode - Piston API), listening for submissions...');
 
+// const LANGUAGE_MAP = {
+//     'javascript': { language: 'javascript', version: '18.15.0' },
+//     'python': { language: 'python', version: '3.10.0' },
+//     'java': { language: 'java', version: '15.0.2' },
+//     'cpp': { language: 'cpp', version: '10.2.0' }
+// };
+
 const LANGUAGE_MAP = {
-    'javascript': { language: 'javascript', version: '18.15.0' },
-    'python': { language: 'python', version: '3.10.0' },
-    'java': { language: 'java', version: '15.0.2' },
-    'cpp': { language: 'cpp', version: '10.2.0' }
+    'javascript': { language: 'javascript' },
+    'python': { language: 'python' },
+    'java': { language: 'java' },
+    'cpp': { language: 'cpp' }
 };
+
 
 // Rate Limiter: Ensure max requests per second
 const rateLimit = (intervalMs) => {
