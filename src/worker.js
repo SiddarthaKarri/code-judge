@@ -5,17 +5,31 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const redis = new Redis(process.env.REDIS_URL, {
-    tls: process.env.REDIS_URL.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined
+    tls: process.env.REDIS_URL.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+    maxRetriesPerRequest: null
 });
 
 redis.on('error', (err) => {
     console.error('Redis connection error:', err.message);
 });
 
-const BACKEND_URL = process.env.BACKEND_URL;
-const PISTON_API_URL = process.env.PISTON_API_URL || 'https://sidcj-production.up.railway.app/api/v2/piston/execute'
-// 'https://boc-coupon-immigration-sophisticated.trycloudflare.com/api/v2/piston/execute'
-// || 'https://universally-electrodialitic-danette.ngrok-free.dev/api/v2/piston/execute' || process.env.PISTON_API_URL || 'https://emkc.org/api/v2/piston/execute';
+// URLs will be fetched dynamically from Redis
+const DEFAULT_BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
+const DEFAULT_PISTON_API_URL = 'https://code-engine-rtj4.onrender.com/api/v2/piston/execute';
+
+async function getSystemUrls() {
+    try {
+        const backendUrl = await redis.get('config:backend_url');
+        const pistonUrl = await redis.get('config:piston_api_url');
+        return {
+            backendUrl: backendUrl || DEFAULT_BACKEND_URL,
+            pistonApiUrl: pistonUrl || DEFAULT_PISTON_API_URL
+        };
+    } catch (err) {
+        console.error('Error fetching config from Redis:', err.message);
+        return { backendUrl: DEFAULT_BACKEND_URL, pistonApiUrl: DEFAULT_PISTON_API_URL };
+    }
+}
 
 console.log('Judge Worker started (Online Mode - Piston API), listening for submissions...');
 
@@ -73,6 +87,7 @@ const rateLimit = (intervalMs) => {
 const schedule = rateLimit(50);
 
 async function runTestCase(testCase, i, total, content, langConfig) {
+    const { pistonApiUrl } = await getSystemUrls();
     console.log(`Running Test Case ${i + 1}/${total} [isSample: ${testCase.isSample}]`);
 
     const payload = {
@@ -96,7 +111,7 @@ async function runTestCase(testCase, i, total, content, langConfig) {
     let retries = 3;
     while (retries > 0) {
         try {
-            response = await axios.post(PISTON_API_URL, payload);
+            response = await axios.post(pistonApiUrl, payload);
             break;
         } catch (err) {
             if (err.response && err.response.status === 429) {
@@ -149,7 +164,8 @@ async function runTestCase(testCase, i, total, content, langConfig) {
 
 async function processSubmission(submission) {
     const { id, code, language, problem, testCases, mode } = submission;
-    console.log(`Processing submission ${id} for problem ${problem.title} [Mode: ${mode}]`);
+    const { backendUrl, pistonApiUrl } = await getSystemUrls();
+    console.log(`Processing submission ${id} for problem ${problem.title} [Mode: ${mode}] using Backend: ${backendUrl}, Piston: ${pistonApiUrl}`);
 
     let finalVerdict = 'Accepted';
     let results = [];
@@ -187,7 +203,7 @@ async function processSubmission(submission) {
             let retries = 3;
             while (retries > 0) {
                 try {
-                    response = await axios.post(PISTON_API_URL, payload);
+                    response = await axios.post(pistonApiUrl, payload);
                     break;
                 } catch (err) {
                     if (err.response && (err.response.status === 429 || err.response.status >= 500)) {
@@ -274,7 +290,12 @@ async function processSubmission(submission) {
 
     // Send verdict back to backend
     try {
-        await axios.post(`${BACKEND_URL}/api/judge/callback`, {
+        let normalizedBackendUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+        if (normalizedBackendUrl.endsWith('/api')) {
+            normalizedBackendUrl = normalizedBackendUrl.slice(0, -4);
+        }
+
+        await axios.post(`${normalizedBackendUrl}/api/judge/callback`, {
             submissionId: id,
             status: finalVerdict,
             output: results
@@ -285,19 +306,35 @@ async function processSubmission(submission) {
     }
 }
 
-async function main() {
-    while (true) {
-        try {
-            const response = await redis.brpop('submissionQueue', 0);
-            if (response) {
-                const submission = JSON.parse(response[1]);
-                await processSubmission(submission);
-            }
-        } catch (err) {
-            console.error('Redis error:', err);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-    }
-}
+const { Worker } = require('bullmq');
+const cluster = require('cluster');
+const os = require('os');
 
-main();
+if (cluster.isPrimary) {
+    const numCPUs = os.cpus().length;
+    console.log(`Primary ${process.pid} is running. Spawning ${numCPUs} workers for maximum parallelization...`);
+
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
+
+    cluster.on('exit', (worker, code, signal) => {
+        console.log(`Worker ${worker.process.pid} died. Respawning...`);
+        cluster.fork();
+    });
+} else {
+    console.log(`Judge Worker started (PID: ${process.pid}, Online Mode - Piston API), listening for submissions via BullMQ...`);
+
+    const worker = new Worker('submissionQueue', async job => {
+        // BullMQ automatically parses job.data back into an object
+        await processSubmission(job.data);
+    }, { connection: redis, concurrency: 5 }); // Process up to 5 jobs concurrently per CPU core
+
+    worker.on('completed', job => {
+        console.log(`[Worker ${process.pid}] Job ${job.id} completed!`);
+    });
+
+    worker.on('failed', (job, err) => {
+        console.error(`[Worker ${process.pid}] Job ${job.id} failed with error ${err.message}`);
+    });
+}
