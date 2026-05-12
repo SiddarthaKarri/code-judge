@@ -337,4 +337,20 @@ if (cluster.isPrimary) {
     worker.on('failed', (job, err) => {
         console.error(`[Worker ${process.pid}] Job ${job.id} failed with error ${err.message}`);
     });
+
+    // ── Health check server (required for Render Web Service) ──────────────
+    // Render needs an open HTTP port to keep the service alive.
+    const http = require('http');
+    const PORT = process.env.PORT || 3001;
+    http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: 'ok',
+            service: 'judge-worker',
+            pid: process.pid,
+            uptime: Math.floor(process.uptime()) + 's',
+        }));
+    }).listen(PORT, '0.0.0.0', () => {
+        console.log(`[Health] Judge Worker health check running on port ${PORT}`);
+    });
 }
