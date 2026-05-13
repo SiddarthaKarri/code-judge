@@ -6,7 +6,15 @@ dotenv.config();
 
 const redis = new Redis(process.env.REDIS_URL, {
     tls: process.env.REDIS_URL.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
-    maxRetriesPerRequest: null
+    maxRetriesPerRequest: null,
+    // Aiven/Standard Redis Optimizations
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+    reconnectOnError: (err) => {
+        const targetError = 'READONLY';
+        if (err.message.includes(targetError)) return true;
+        return false;
+    },
+    connectTimeout: 10000,
 });
 
 redis.on('error', (err) => {
